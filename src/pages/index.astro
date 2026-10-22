@@ -1,11 +1,65 @@
 ---
-import Welcome from '../components/Welcome.astro';
 import Layout from '../layouts/Layout.astro';
+import "../styles/global.css";
 
-// Welcome to Astro! Wondering what to do next? Check out the Astro documentation at https://docs.astro.build
-// Don't want to use any of this? Delete everything in this file, the `assets`, `components`, and `layouts` directories, and start fresh.
+// Import interactive editor area (React island)
+import { EditorArea as EditorArea } from '../components/EditorArea.tsx';
+
+// Import Lucide React icons
+import { Sparkles } from 'lucide-react';
 ---
 
 <Layout>
-	<Welcome />
+	<div class="min-h-screen bg-white flex flex-col items-center px-4 py-5 sm:px-8">
+		<header class="w-full max-w-[1440px] flex items-center justify-between mb-5">
+			<div class="flex items-center gap-3">
+				<div class="p-2 bg-purple-100 rounded-lg">
+					<Sparkles class="w-6 h-6 text-purple-600" />
+				</div>
+				<h1 class="text-2xl font-bold text-gray-900">Logosend</h1>
+			</div>
+			<div class="relative" id="download-menu">
+				<button type="button" id="download-trigger" aria-haspopup="menu" aria-expanded="false" class="rounded-md bg-gray-900 px-5 py-2.5 text-sm font-medium text-white transition hover:bg-gray-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-500 focus-visible:ring-offset-2">Download</button>
+				<div id="download-options" role="menu" aria-labelledby="download-trigger" class="absolute right-0 top-full z-20 mt-2 hidden w-44 overflow-hidden rounded-lg border border-gray-200 bg-white p-1 shadow-lg">
+					<button type="button" role="menuitem" data-export="png" class="block w-full rounded-md px-3 py-2 text-left text-sm text-gray-700 hover:bg-gray-100">Download PNG</button>
+					<button type="button" role="menuitem" data-export="svg" class="block w-full rounded-md px-3 py-2 text-left text-sm text-gray-700 hover:bg-gray-100">Download SVG</button>
+				</div>
+			</div>
+		</header>
+
+		{/* Main content: three columns divided by shadcn separators */}
+		<main class="w-full max-w-[1120px] flex-1 flex items-stretch">
+			<EditorArea client:load />
+		</main>
+
+		{/* Footer */}
+		<footer class="w-full border-t border-gray-200 pt-8 mb-8">
+			<p class="text-center text-sm text-gray-500">
+				© 2024 Logosend. All rights reserved.
+			</p>
+		</footer>
+	</div>
+	<script>
+		const trigger = document.querySelector<HTMLButtonElement>('#download-trigger');
+		const options = document.querySelector<HTMLDivElement>('#download-options');
+		const menu = document.querySelector<HTMLDivElement>('#download-menu');
+		trigger?.addEventListener('click', () => {
+			const isOpen = !options?.classList.contains('hidden');
+			options?.classList.toggle('hidden', isOpen);
+			trigger.setAttribute('aria-expanded', String(!isOpen));
+		});
+		document.addEventListener('click', (event) => {
+			if (menu && !menu.contains(event.target as Node)) {
+				options?.classList.add('hidden');
+				trigger?.setAttribute('aria-expanded', 'false');
+			}
+		});
+		document.querySelectorAll<HTMLButtonElement>('[data-export]').forEach((button) => {
+			button.addEventListener('click', () => {
+				window.dispatchEvent(new CustomEvent('logosend:export', { detail: button.dataset.export }));
+				options?.classList.add('hidden');
+				trigger?.setAttribute('aria-expanded', 'false');
+			});
+		});
+	</script>
 </Layout>
