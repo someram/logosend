@@ -5,18 +5,14 @@ import "../styles/global.css";
 // Import interactive editor area (React island)
 import { EditorArea as EditorArea } from '../components/EditorArea.tsx';
 
-// Import Lucide React icons
-import { Sparkles } from 'lucide-react';
 ---
 
 <Layout>
 	<div class="min-h-screen bg-white flex flex-col items-center px-4 py-5 sm:px-8">
 		<header class="w-full max-w-[1440px] flex items-center justify-between mb-5">
 			<div class="flex items-center gap-3">
-				<div class="p-2 bg-purple-100 rounded-lg">
-					<Sparkles class="w-6 h-6 text-purple-600" />
-				</div>
-				<h1 class="text-2xl font-bold text-gray-900">Logosend</h1>
+				<img src="/logosend-design.svg" alt="" class="h-10 w-10 rounded-lg" />
+				<h1 class="font-serif text-2xl font-bold tracking-tight text-gray-900">Logosend</h1>
 			</div>
 			<div class="relative" id="download-menu">
 				<button type="button" id="download-trigger" aria-haspopup="menu" aria-expanded="false" class="rounded-md bg-gray-900 px-5 py-2.5 text-sm font-medium text-white transition hover:bg-gray-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-500 focus-visible:ring-offset-2">Download</button>

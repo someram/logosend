@@ -1,13 +1,11 @@
 "use client";
 
 import * as React from "react";
-import { createElement } from "react";
-import { renderToStaticMarkup } from "react-dom/server";
 import { Sparkles } from "lucide-react";
 import { Button } from "../../components/ui/button";
 import { Separator } from "../../components/ui/separator";
 import { ScrollArea } from "../../components/ui/scroll-area";
-import { IconEditorPanel, type IconEntry } from "./IconEditorPanel";
+import { getIconEntryByName, IconEditorPanel, type IconEntry } from "./IconEditorPanel";
 import type { ColorValue } from "./ColorPicker";
 import { ColorPicker } from "./ColorPicker";
 import { Slider } from "../../components/ui/slider";
@@ -15,6 +13,7 @@ import { Slider } from "../../components/ui/slider";
 const initialColor: ColorValue = { h: 210, s: 80, v: 95, a: 100 };
 type CanvasIcon = { id: number; icon: IconEntry; x: number; y: number; size: number; rotate: number; radius: number; color: ColorValue };
 type SheetStop = { id: number; color: ColorValue };
+const DESIGN_STORAGE_KEY = "logosend-design-v1";
 
 function toCssColor({ h, s, v, a }: ColorValue) {
   const saturation = s / 100, value = v / 100, chroma = value * saturation;
@@ -42,6 +41,7 @@ export function EditorArea() {
   const nextId = React.useRef(2);
   const drag = React.useRef<{ id: number; startX: number; startY: number; x: number; y: number } | null>(null);
   const [isDragging, setIsDragging] = React.useState(false);
+  const [designLoaded, setDesignLoaded] = React.useState(false);
   const sheetRef = React.useRef<HTMLDivElement>(null);
   const updateLayer = (id: number, changes: Partial<CanvasIcon>) => setIcons((all) => all.map((layer) => layer.id === id ? { ...layer, ...changes } : layer));
   const addIcon = (icon: IconEntry) => {
@@ -51,20 +51,107 @@ export function EditorArea() {
   };
   const sheetBackground = sheetMode === "solid" ? toCssColor(sheetColor) : `linear-gradient(${gradientAngle}deg, ${stops.map((stop, index) => `${toCssColor(stop.color)} ${Math.round(index / Math.max(1, stops.length - 1) * 100)}%`).join(", ")})`;
 
+  // Restore a saved design after hydration so the server and initial client
+  // render stay in sync. Icon components are resolved from their saved names.
+  React.useEffect(() => {
+    try {
+      const saved = localStorage.getItem(DESIGN_STORAGE_KEY);
+      if (saved) {
+        const design = JSON.parse(saved) as {
+          icons?: (Omit<CanvasIcon, "icon"> & { iconName: string })[];
+          selectedId?: number;
+          sheetMode?: "solid" | "gradient";
+          sheetColor?: ColorValue;
+          stops?: SheetStop[];
+          selectedStop?: number;
+          gradientAngle?: number;
+          sheetRadius?: number;
+          sheetPadding?: number;
+          sheetShadow?: number;
+        };
+        if (Array.isArray(design.icons)) {
+          const restored = design.icons.flatMap((layer) => {
+            const icon = getIconEntryByName(layer.iconName);
+            return icon && typeof layer.id === "number" ? [{ ...layer, icon }] : [];
+          });
+          if (restored.length || design.icons.length === 0) {
+            setIcons(restored);
+            setSelectedId(typeof design.selectedId === "number" ? design.selectedId : restored[0]?.id ?? 0);
+            nextId.current = Math.max(1, ...restored.map((layer) => layer.id + 1));
+          }
+        }
+        if (design.sheetMode === "solid" || design.sheetMode === "gradient") setSheetMode(design.sheetMode);
+        if (design.sheetColor) setSheetColor(design.sheetColor);
+        if (Array.isArray(design.stops) && design.stops.length >= 2) setStops(design.stops);
+        if (typeof design.selectedStop === "number") setSelectedStop(design.selectedStop);
+        if (typeof design.gradientAngle === "number") setGradientAngle(design.gradientAngle);
+        if (typeof design.sheetRadius === "number") setSheetRadius(design.sheetRadius);
+        if (typeof design.sheetPadding === "number") setSheetPadding(design.sheetPadding);
+        if (typeof design.sheetShadow === "number") setSheetShadow(design.sheetShadow);
+      }
+    } catch {
+      // Ignore unavailable storage or malformed saved data and start fresh.
+    }
+    setDesignLoaded(true);
+  }, []);
+
+  React.useEffect(() => {
+    if (!designLoaded) return;
+    try {
+      localStorage.setItem(DESIGN_STORAGE_KEY, JSON.stringify({
+        icons: icons.map(({ icon, ...layer }) => ({ ...layer, iconName: icon.name })),
+        selectedId,
+        sheetMode,
+        sheetColor,
+        stops,
+        selectedStop,
+        gradientAngle,
+        sheetRadius,
+        sheetPadding,
+        sheetShadow,
+      }));
+    } catch {
+      // Storage can be disabled or full; the editor remains usable.
+    }
+  }, [designLoaded, icons, selectedId, sheetMode, sheetColor, stops, selectedStop, gradientAngle, sheetRadius, sheetPadding, sheetShadow]);
+
   const exportArtwork = React.useCallback((format: "png" | "svg") => {
     const size = 512;
-    const padding = Math.min(sheetPadding, size / 3);
+    // Map the rendered preview geometry directly into the export. The outer
+    // sheet includes CSS padding; icon positions are relative to its inner box.
+    const sheet = sheetRef.current;
+    const outerRect = sheet?.parentElement?.getBoundingClientRect();
+    const sheetRect = sheet?.getBoundingClientRect();
+    const scale = size / (outerRect?.width ?? 440);
+    const padding = outerRect && sheetRect ? (sheetRect.left - outerRect.left) * scale : sheetPadding * scale;
+    const radius = sheetRadius * scale;
     const innerSize = size - padding * 2;
     const gradientId = "logosend-background";
+    const shadows = [null, [0, 1, 2, 0.12], [0, 4, 8, 0.16], [0, 10, 18, 0.2], [0, 18, 28, 0.24], [0, 25, 50, 0.3]] as const;
+    const shadow = shadows[sheetShadow];
+    const shadowFilter = shadow ? `<filter id="logosend-shadow" x="-30%" y="-30%" width="160%" height="160%"><feDropShadow dx="0" dy="${shadow[1] * scale}" stdDeviation="${shadow[2] * scale / 2}" flood-color="#000" flood-opacity="${shadow[3]}"/></filter>` : "";
+    const shadowAttr = shadow ? ` filter="url(#logosend-shadow)"` : "";
     const background = sheetMode === "solid"
-      ? `<rect x="${padding}" y="${padding}" width="${innerSize}" height="${innerSize}" rx="${sheetRadius}" fill="${toCssColor(sheetColor)}"/>`
-      : `<defs><linearGradient id="${gradientId}" gradientTransform="rotate(${gradientAngle})">${stops.map((stop, index) => `<stop offset="${Math.round(index / Math.max(1, stops.length - 1) * 100)}%" stop-color="${toCssColor(stop.color)}"/>`).join("")}</linearGradient></defs><rect x="${padding}" y="${padding}" width="${innerSize}" height="${innerSize}" rx="${sheetRadius}" fill="url(#${gradientId})"/>`;
+      ? `<defs>${shadowFilter}</defs><rect x="${padding}" y="${padding}" width="${innerSize}" height="${innerSize}" rx="${radius}" fill="${toCssColor(sheetColor)}"${shadowAttr}/>`
+      : `<defs>${shadowFilter}<linearGradient id="${gradientId}" x1="${50 - 50 * Math.sin(gradientAngle * Math.PI / 180)}%" y1="${50 + 50 * Math.cos(gradientAngle * Math.PI / 180)}%" x2="${50 + 50 * Math.sin(gradientAngle * Math.PI / 180)}%" y2="${50 - 50 * Math.cos(gradientAngle * Math.PI / 180)}%">${stops.map((stop, index) => `<stop offset="${Math.round(index / Math.max(1, stops.length - 1) * 100)}%" stop-color="${toCssColor(stop.color)}"/>`).join("")}</linearGradient></defs><rect x="${padding}" y="${padding}" width="${innerSize}" height="${innerSize}" rx="${radius}" fill="url(#${gradientId})"${shadowAttr}/>`;
     const layers = icons.map((layer) => {
-      const Icon = layer.icon.Component;
-      const icon = renderToStaticMarkup(createElement(Icon, { width: "72%", height: "72%", strokeWidth: layer.radius, "aria-hidden": true }));
-      const x = padding + innerSize * layer.x / 100;
-      const y = padding + innerSize * layer.y / 100;
-      return `<g transform="translate(${x} ${y}) rotate(${layer.rotate})" color="${toCssColor(layer.color)}"><svg x="${-layer.size / 2}" y="${-layer.size / 2}" width="${layer.size}" height="${layer.size}" viewBox="0 0 24 24">${icon.replace(/^<svg[^>]*>/, "").replace(/<\/svg>$/, "")}</svg></g>`;
+      const previewLayer = sheet?.querySelector<HTMLElement>(`[data-layer-id="${layer.id}"]`);
+      const previewIcon = previewLayer?.querySelector<SVGSVGElement>("svg");
+      if (!previewIcon) return "";
+      const layerRect = previewLayer.getBoundingClientRect();
+      const x = (layerRect.left + layerRect.width / 2 - (outerRect?.left ?? 0)) * scale;
+      const y = (layerRect.top + layerRect.height / 2 - (outerRect?.top ?? 0)) * scale;
+      const icon = previewIcon.cloneNode(true) as SVGSVGElement;
+      // Measure the actual SVG dimensions so the exported icon follows the
+      // same capped/responsive size as the editor preview.
+      const iconSize = Number.parseFloat(getComputedStyle(previewIcon).width) * scale;
+      icon.removeAttribute("class");
+      icon.removeAttribute("style");
+      icon.setAttribute("x", String(-iconSize / 2));
+      icon.setAttribute("y", String(-iconSize / 2));
+      icon.setAttribute("width", String(iconSize));
+      icon.setAttribute("height", String(iconSize));
+      return `<g transform="translate(${x} ${y}) rotate(${layer.rotate})" color="${toCssColor(layer.color)}">${icon.outerHTML}</g>`;
     }).join("");
     const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 ${size} ${size}">${background}${layers}</svg>`;
     const filename = `logosend-design.${format}`;
@@ -201,7 +288,7 @@ export function EditorArea() {
             <div ref={sheetRef} className="relative h-full w-full overflow-hidden" style={{ background: sheetBackground, borderRadius: `${sheetRadius}px`, boxShadow: ["none", "0 1px 2px rgb(0 0 0 / 0.12)", "0 4px 8px rgb(0 0 0 / 0.16)", "0 10px 18px rgb(0 0 0 / 0.2)", "0 18px 28px rgb(0 0 0 / 0.24)", "0 25px 50px rgb(0 0 0 / 0.3)"][sheetShadow] }}>
             {icons.map((layer) => {
               const Icon = layer.icon.Component;
-              return <button key={layer.id} type="button" aria-label={`Select or move ${layer.icon.name}`} onClick={() => setSelectedId(layer.id)} onPointerDown={(event) => { event.preventDefault(); setSelectedId(layer.id); drag.current = { id: layer.id, startX: event.clientX, startY: event.clientY, x: layer.x, y: layer.y }; setIsDragging(true); }} className="absolute flex -translate-x-1/2 -translate-y-1/2 cursor-move touch-none items-center justify-center bg-transparent p-0" style={{ left: `${layer.x}%`, top: `${layer.y}%`, width: `min(${layer.size}px, 82vw, 82vh)`, height: `min(${layer.size}px, 82vw, 82vh)`, color: toCssColor(layer.color), transform: `translate(-50%, -50%) rotate(${layer.rotate}deg)` }}>
+              return <button key={layer.id} data-layer-id={layer.id} type="button" aria-label={`Select or move ${layer.icon.name}`} onClick={() => setSelectedId(layer.id)} onPointerDown={(event) => { event.preventDefault(); setSelectedId(layer.id); drag.current = { id: layer.id, startX: event.clientX, startY: event.clientY, x: layer.x, y: layer.y }; setIsDragging(true); }} className="absolute flex -translate-x-1/2 -translate-y-1/2 cursor-move touch-none items-center justify-center bg-transparent p-0" style={{ left: `${layer.x}%`, top: `${layer.y}%`, width: `min(${layer.size}px, 82vw, 82vh)`, height: `min(${layer.size}px, 82vw, 82vh)`, color: toCssColor(layer.color), transform: `translate(-50%, -50%) rotate(${layer.rotate}deg)` }}>
                 <Icon aria-hidden="true" style={{ width: "72%", height: "72%" }} strokeWidth={layer.radius} />
               </button>;
             })}

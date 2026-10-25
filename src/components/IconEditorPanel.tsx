@@ -32,6 +32,10 @@ const CHARACTER_ENTRIES: IconEntry[] = CHARACTER_NAMES.map((name) => ({
 }));
 const ALL_ICONS = [...LUCIDE_ENTRIES, ...CHARACTER_ENTRIES];
 
+export function getIconEntryByName(name: string): IconEntry | undefined {
+  return ALL_ICONS.find((icon) => icon.name === name);
+}
+
 export function IconEditorPanel({ selectedIcon, onSelectIcon, size, onSizeChange, rotate, onRotateChange, borderRadius, onBorderRadiusChange, color, onColorChange, onColorCssChange, layers, selectedLayerId, onSelectLayer }: IconEditorPanelProps) {
   const [searchQuery, setSearchQuery] = React.useState("");
   const [loadedCount, setLoadedCount] = React.useState(60);
